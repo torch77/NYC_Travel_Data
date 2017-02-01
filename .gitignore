@@ -16,6 +16,14 @@
 
 # RStudio files
 .Rproj.user/
+*.Rproj
+
+# Misc Folders and Data
+Shortcuts/**
+Notes_Scratch/**
+Documentation/**
+Data/**
+.dropbox
 
 # produced vignettes
 vignettes/*.html
