@@ -28,7 +28,20 @@ load_table <- function(db, table, table_name, pk = NA){
     s <- paste0("CREATE UNIQUE INDEX ", table_name, "_", pk, "_index ON ", table_name, " (", pk, ");")
     dbClearResult(dbSendQuery(conn = db, s))
   }
-    
+  # create fact table indices
+  if(table_name == "fact_table"){
+    s <- paste0("CREATE INDEX ", table_name, "_", "hour_id", "_index ON ",
+                table_name, " (", "hour_id", ");")
+    dbClearResult(dbSendQuery(conn = db, s))
+    s <- paste0("CREATE INDEX ", table_name, "_", "datekey", "_index ON ",
+                table_name, " (", "datekey", ");")
+    dbClearResult(dbSendQuery(conn = db, s))
+  }
+  
+}
+analyze_db <- function(db){
+  s <- "Analyze;"
+  dbClearResult(dbSendQuery(conn = db, s))
 }
 import.csv <- function(filename) {
   return(read.csv(filename, sep = ",", header = TRUE, na.strings = c("NA")))
@@ -177,11 +190,13 @@ save_dfs(c("agg_yellow_list"), "./Data/Agg_yellow_data_frames.rda")
 
 ##### Dimensions #####
 # hour table
-hour_tb <- tibble(hour_id = 1:23, hour = 1:23) %>% 
-  mutate(hour_am_pm = if_else(hour<=12, paste0(hour, "am"), paste0(hour%%12, "pm")), hour_am_pm = as.factor(hour_am_pm))
-date_tb <- import.csv("./Data/Date_Table.csv") %>%
-  rename(datekey = DateKey)
-mode_tb <- tibble(mode_id = 1:5, mode = c("TNC", "Yellow Taxi", "Green Taxi", "Subway", "CitiBike"))
+hour_tb <- tibble(hour_id = 0:23, hour = 0:23) %>% 
+  mutate(hour_am_pm = if_else(hour<12, paste0(hour, "am"), paste0(hour%%12, "pm")),
+         hour_am_pm = gsub("^0", "12", hour_am_pm),
+         hour_am_pm = as.factor(hour_am_pm))
+date_tb <- import.csv("./Data/Date_Table.csv")
+colnames(date_tb) <- tolower(colnames(date_tb))
+mode_tb <- tibble(mode_id = 1:5, mode_text = c("TNC", "Yellow Taxi", "Green Taxi", "Subway", "CitiBike"))
 tnc_tb <- import.csv("./Data/Aggregate_TLC_Data/FHV_Base_Aggregate_Report.csv")
 tnc_tb <- distinct(tnc_tb, Base_License_Number, Base_Name)
 tnc_tb <- mutate(tnc_tb, tnc_id = seq(1:nrow(tnc_tb))) %>%
@@ -200,7 +215,7 @@ if(!dir.exists("./Data/db")){
 }
 
 # Connect or Create Database in db directory
-db = dbConnect(SQLite(), "./Data/db/congestion.sqlite")
+db <- dbConnect(SQLite(), "./Data/db/congestion.sqlite")
 
 # load dimensions, no primary keys for now
 load_table(db, taxi_zone_lookup, "taxi_zones", "location_id")
@@ -230,8 +245,14 @@ agg_bike_table <- od_collapse(agg_bike_list, 5, "pickup_datetime", "dropoff_date
 
 # bind into one table and sort by date, hour, mode before creating pk
 fact_table <- bind_rows(agg_bike_table, agg_green_table, agg_yellow_table, agg_tnc_table) %>%
+  mutate(hour_am_pm = if_else(hour_id <12, paste0(hour_id, "am"), paste0(hour_id%%12, "pm")),
+         hour_am_pm = gsub("^0", "12", hour_am_pm),
+         hour_am_pm = as.factor(hour_am_pm))%>%
   arrange(datekey, hour_id, mode_id)
 fact_table <- mutate(fact_table, fact_id = seq(1:nrow(fact_table))) 
 
 # maybe we should have a seperate table for tnc companies?
 load_table(db, fact_table, "fact_table", "fact_id")
+
+# analyze db
+analyze_db(db)
