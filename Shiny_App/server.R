@@ -3,6 +3,8 @@ library(tidyverse)
 library(lubridate)
 library(leaflet)
 library(shiny)
+library(rgdal)
+library(jsonlite)
 
 # http://deanattali.com/blog/building-shiny-apps-tutorial/
 
@@ -20,6 +22,9 @@ max_date <- ymd("2016-10-04")
 modes <- tbl(db, "mode_dim") %>% collect()
 
 #tbls for queries
+
+# get shapefile for taxi zones, why aren't relative paths working right now
+zone_polys <- readOGR(dsn = "C:/Users/Jwhit/Dropbox/Datasets/NYC_Travel_Data/Data/taxi_zones", layer = "taxi_zones_wgs")
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
@@ -53,7 +58,8 @@ shinyServer(function(input, output) {
   # reactive fx for sql query, only evaluate inputs when action button is clicked
   db_query <- eventReactive(input$eval_req, {
     # get inputs for db query
-    zone_choice <- input$taxi_zones
+    #zone_choice <- input$taxi_zones
+    zone_choice <- input$map_shape_click$id
     mode_choice <- input$modes
     min_date_choice <- format(input$date_range[1])
     max_date_choice <- format(input$date_range[2])
@@ -61,7 +67,7 @@ shinyServer(function(input, output) {
     
     if("All" %in% mode_choice){
       # select zone
-      zone_tbl <- tbl(db, "taxi_zones") %>% filter_(~Zone == zone_choice)
+      zone_tbl <- tbl(db, "taxi_zones") %>% filter_(~location_id == zone_choice)
       # select date range
       date_tbl <- tbl(db, "date_dim") %>% filter_(~fulldate >= min_date_choice, 
                                                  ~fulldate <= max_date_choice)
@@ -76,10 +82,11 @@ shinyServer(function(input, output) {
       # build query
       query <- inner_join(fact_table, zone_tbl) %>%
         inner_join(date_tbl) %>% 
-        inner_join(mode_tbl) 
+        inner_join(mode_tbl) %>%
+        inner_join(tbl(db, "od_dim"))
     }else{
       # select zone
-      zone_tbl <- tbl(db, "taxi_zones") %>% filter_(~Zone == zone_choice)
+      zone_tbl <- tbl(db, "taxi_zones") %>% filter_(~location_id == zone_choice)
       # select date range
       date_tbl <- tbl(db, "date_dim") %>% filter_(~fulldate >= min_date_choice, 
                                                   ~fulldate <= max_date_choice)
@@ -98,10 +105,10 @@ shinyServer(function(input, output) {
       query <- inner_join(tbl(db, "fact_table"), zone_tbl) %>%
         inner_join(date_tbl) %>% 
         inner_join(mode_tbl) %>%
-        inner_join(hour_tbl)
-      cat(explain(query))
+        inner_join(tbl(db, "od_dim"))
+
     }
-    
+   # cat(explain(query))
     # collect results
     results <- query %>% collect(n = Inf)
     
@@ -115,24 +122,34 @@ shinyServer(function(input, output) {
   # create histogram
   output$plot1 <- renderPlot({
     # get df
-    trips<- db_query()
+    trips <- db_query()
 
     # plot
-    p <- ggplot(data = filter(all_trips),
-                aes(x = date_hour, y = trips, color = od_type)) +
+    p <- ggplot(data = filter(trips),
+                aes(x = ymd_h(paste(fulldate, hour_id)), y = trips, color = od_type)) +
       geom_line() +
       facet_wrap("mode_text")
     print(p)
 
   })
 
-  # 
   # Table
   output$table1 <- renderDataTable({
     # table for dynamic view
     db_query()
 
   })
+  
+  # selection map
+  # render base map
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = zone_polys, weight = 1, fillOpacity = 0.4, smoothFactor = 0.5, 
+                  popup = ~zone, layerId = zone_polys@data$LocationID)
+  })
+ # observe({print(filter(taxi_zones, location_id == input$map_shape_click$id))})
+  
   # 
   # # table for download
   # output$downloadData <- downloadHandler(
