@@ -106,6 +106,7 @@ save_dfs(dfs, "./Data/Green_data_frames_2016.rda")
 ### Turnstile ###
 # load data
 turnstile_data <- load.dir("./Data/Turnstile_data/", ".txt", "Field")
+colnames(turnstile_data) <- tolower(colnames(turnstile_data))
 # save/clear data
 dfs <- c("turnstile_data")
 save_dfs(dfs, "./Data/Turnstile_data_frames.rda")

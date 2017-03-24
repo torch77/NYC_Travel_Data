@@ -5,6 +5,9 @@ library(tidyverse)
 library(readxl)
 library(plotly)
 library(lubridate)
+library(reshape2)
+library(forecast)
+library(ggplot)
 
 
 
@@ -83,7 +86,22 @@ group_by(turnstile_data, STATION, LINENAME, DIVISION) %>%
   arrange(num) %>%
   print(n = 50)
 
+
+# duplicate 42 stations
 filter(turnstile_data, grepl(".42.",STATION)) %>% distinct(STATION, LINENAME, DIVISION)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

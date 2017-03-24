@@ -36,6 +36,9 @@ load_table <- function(db, table, table_name, pk = NA){
     s <- paste0("CREATE INDEX ", table_name, "_", "datekey", "_index ON ",
                 table_name, " (", "datekey", ");")
     dbClearResult(dbSendQuery(conn = db, s))
+    s <- paste0("CREATE INDEX ", table_name, "_", "provider_id", "_index ON ",
+                table_name, " (", "provider_id", ");")
+    dbClearResult(dbSendQuery(conn = db, s))
   }
   
 }
@@ -54,9 +57,10 @@ save_dfs <- function(dfs, location){
   rm(list = dfs, pos = ".GlobalEnv")
   gc()
 }
-# function to create datekey nad handle padding of day and month
+# function to create datekey and handle padding of day and month
 create_datekey <- function(df, col){
   
+  df <- ungroup(df)
   df <- mutate(df, year = year(df[[col]]), month = month(df[[col]]), day = day(df[[col]]), 
                month = if_else(month < 10, paste0(0, month), as.character(month)), 
                day = if_else(day < 10, paste0(0, day), as.character(day)), 
@@ -96,6 +100,77 @@ od_collapse <- function(list, mode, date_col_o, date_col_d){
   return(df)
   
 }
+# function to aggregate yellow data, split variable indicates whether to combine dfs before aggregating
+# not combining saves memory since the records for each table are reduced, however, this can cause some erroneous entries
+# around the beginning of a month from trips which began in the previous month and are split between csvs
+# I have only tried combining 6 months at once (on a machine with 32gb ram) so any more may cause memory issues
+aggregate_yellow <- function(yellow_list_2016, split){
+  if(split){
+    for(i in 1:length(yellow_list_2016)){
+      print(i)
+      if(i==1){
+        agg_yellow_origins <- group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
+          summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                    person_miles_travelled = sum(trip_distance*passenger_count)) 
+        
+        agg_yellow_dests <- group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
+          summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                    person_miles_travelled = sum(trip_distance)/sum(passenger_count)) 
+      }else{
+        agg_yellow_origins <- bind_rows(agg_yellow_origins, 
+                                        group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
+                                          summarise(trips = n(),
+                                                    passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                                                    person_miles_travelled = sum(trip_distance*passenger_count)))
+        
+        agg_yellow_dests <- bind_rows(agg_yellow_dests, 
+                                     group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
+                                       summarise(trips = n(),
+                                                 passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                                                 person_miles_travelled = sum(trip_distance)/sum(passenger_count))) 
+        
+        
+      }
+      
+    }
+  }else{
+    for(i in 1:length(yellow_list_2016)){
+      print(i)
+      if(i==1){
+        agg_yellow_origins <- yellow_list_2016[[i]]$origins@data 
+        
+        agg_yellow_dests <- yellow_list_2016[[i]]$dests@data
+      }else{
+        agg_yellow_origins <- bind_rows(agg_yellow_origins, yellow_list_2016[[i]]$origins@data)
+        
+        agg_yellow_dests<- bind_rows(agg_yellow_dests, yellow_list_2016[[i]]$dests@data) 
+        
+      }
+      gc()
+    }
+    # aggregate data
+    print("aggregating")
+    agg_yellow_origins <-  group_by(agg_yellow_origins, LocationID, tpep_pickup_datetime) %>%
+      summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                person_miles_travelled = sum(trip_distance*passenger_count))
+    
+    agg_yellow_dests <- group_by(agg_yellow_dests, LocationID, tpep_dropoff_datetime) %>%
+      summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                person_miles_travelled = sum(trip_distance)/sum(passenger_count))
+  }
+  
+  # clean up columns
+  agg_yellow_origins <- rename(agg_yellow_origins, pickup_datetime = tpep_pickup_datetime)
+  agg_yellow_dests <- rename(agg_yellow_dests, dropoff_datetime = tpep_dropoff_datetime)
+  # list dfs and name
+  agg_yellow_list <- list(agg_yellow_origins, agg_yellow_dests)
+  names(agg_yellow_list) <- c("origins","dests")
+  gc()
+  
+  return(agg_yellow_list)
+}
+
+
 
 ##### Aggregate Data #####
 ### TNC ###
@@ -150,42 +225,10 @@ save_dfs(c("agg_green_list"), "./Data/Agg_Green_data_frames.rda")
 load("./Data/Clean_Yellow_data_frames_2016.rda")
 
 ### Aggregate by day hour and zone
-for(i in 1:length(yellow_list_2016)){
-  print(i)
-  if(i==1){
-    agg_yellow_origins <- group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
-      summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                person_miles_travelled = sum(trip_distance*passenger_count)) 
-    
-    agg_yellow_dests <- group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
-      summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                person_miles_travelled = sum(trip_distance)/sum(passenger_count)) 
-  }else{
-    agg_yellow_origins <- bind_rows(agg_yellow_origins, 
-                                    group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
-                                      summarise(trips = n(),
-                                        passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                                        person_miles_travelled = sum(trip_distance*passenger_count)))
-    
-    agg_yellow_dests<- bind_rows(agg_yellow_dests, 
-                                 group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
-                                  summarise(trips = n(),
-                                    passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                                    person_miles_travelled = sum(trip_distance)/sum(passenger_count))) 
+agg_yellow_list <- aggregate_yellow(yellow_list_2016, split = F)
 
-
-  }
-  
-}
-agg_yellow_origins <- rename(agg_yellow_origins, pickup_datetime = tpep_pickup_datetime)
-agg_yellow_dests <- rename(agg_yellow_dests, dropoff_datetime = tpep_dropoff_datetime)
-
-agg_yellow_list <- list(agg_yellow_origins, agg_yellow_dests)
-names(agg_yellow_list) <- c("origins","dests")
-
-rm("yellow_list_2016", "agg_yellow_origins", "agg_yellow_dests")
+rm("yellow_list_2016")
 save_dfs(c("agg_yellow_list"), "./Data/Agg_yellow_data_frames.rda")
-
 
 
 ##### Dimensions #####
@@ -193,20 +236,38 @@ save_dfs(c("agg_yellow_list"), "./Data/Agg_yellow_data_frames.rda")
 hour_tb <- tibble(hour_id = 0:23, hour = 0:23) %>% 
   mutate(hour_am_pm = if_else(hour<12, paste0(hour, "am"), paste0(hour%%12, "pm")),
          hour_am_pm = gsub("^0", "12", hour_am_pm),
-         hour_am_pm = as.factor(hour_am_pm))
+         hour_am_pm = as.factor(hour_am_pm), 
+         am_pm = as.factor(if_else(hour_id < 12, "AM", "PM")), 
+         peak_off_peak = as.factor(if_else((hour_id >= 7 & hour_id < 10) | (hour_id >= 17 & hour_id < 20), 
+                                           "Peak", "Off Peak")))
 date_tb <- import.csv("./Data/Date_Table.csv")
 colnames(date_tb) <- tolower(colnames(date_tb))
-mode_tb <- tibble(mode_id = 1:5, mode_text = c("TNC", "Yellow Taxi", "Green Taxi", "Subway", "CitiBike"))
-tnc_tb <- import.csv("./Data/Aggregate_TLC_Data/FHV_Base_Aggregate_Report.csv")
-tnc_tb <- distinct(tnc_tb, Base_License_Number, Base_Name)
-tnc_tb <- mutate(tnc_tb, tnc_id = seq(1:nrow(tnc_tb))) %>%
-  select(tnc_id, Base_License_Number, Base_Name)
+mode_tb <- tibble(mode_id = 1:4, mode_text = c("TNC", "Taxi", "Subway", "Bike Share"))
+# tnc companies and service providers
+provider_tb <- import.csv("./Data/Aggregate_TLC_Data/FHV_Base_Aggregate_Report.csv")
+# categorize dispatching stations 
+provider_tb <- distinct(provider_tb, Base_License_Number, Base_Name, DBA) %>%
+  mutate(provider_type = if_else(grepl("^UBER-.*$", DBA), "Uber", 
+                            if_else(grepl("^LYFT-.*$", DBA), "Lyft", 
+                                    if_else(grepl("^VIA-.*$", DBA), "Via",
+                                            if_else(grepl("^GETT$", DBA), "Gett", 
+                                                    if_else(grepl("^JUNO$", DBA), "Juno", "Other TNC/Black Car")))))) 
+
+provider_tb <- mutate(provider_tb, provider_id = if_else(provider_type == "Uber", 1, 
+                                          if_else(provider_type == "Lyft", 2, 
+                                                  if_else(provider_type == "Via", 3, 
+                                                          if_else(provider_type == "Gett", 4, 
+                                                                  if_else(provider_type == "Juno", 5, 6)))))) %>%
+  select(provider_id, Base_License_Number, provider_type) %>%
+  # add other service providers
+  bind_rows(data_frame(provider_id = c(7,8,9,10), Base_License_Number = c(NA,NA,NA,NA),
+                       provider_type = c("Yellow Taxi", "Green Taxi", "Citi Bike", "Subway")))
 weather_tb <- import.csv("./Data/Weather/weather_data.csv")
 weather_tb <- filter(weather_tb, STATION_NAME == "NY CITY CENTRAL PARK NY US") %>%
   rename(datekey = DATE)
 taxi_zone_lookup <- as_data_frame(import.csv("./Data/TNC_Data/taxi_zone_lookup.csv")) %>%
   rename(location_id = LocationID)
-od_tb <- tibble(od_id = 1:3, od_type = c("Origin", "Destination", NA))
+od_tb <- tibble(od_id = 1:2, od_type = c("Origin", "Destination"))
 ##### Store Data #####
 ### Initial Set Up ###
 # create db
@@ -222,7 +283,7 @@ load_table(db, taxi_zone_lookup, "taxi_zones", "location_id")
 load_table(db, hour_tb, "hour_dim", "hour_id")
 load_table(db, date_tb, "date_dim", "datekey")
 load_table(db, mode_tb, "mode_dim", "mode_id")
-load_table(db, tnc_tb, "tnc_companies", "tnc_id")
+load_table(db, distinct(provider_tb, provider_id, provider_type), "service_providers", "provider_id")
 load_table(db, weather_tb, "weather_dim", "datekey")
 load_table(db, od_tb, "od_dim", "od_id")
 
@@ -233,15 +294,21 @@ load("./Data/Agg_yellow_data_frames.rda")
 load("./Data/Agg_Green_data_frames.rda")
 # TNC
 agg_tnc_table <- ungroup(agg_tnc_data) %>%
-  mutate(hour_id = hour(pickup_date_hour), mode_id = 1, od_id = 3) %>% 
-  inner_join(select(tnc_tb, tnc_id, Base_License_Number), by = c("Dispatching_base_num" = "Base_License_Number")) %>%
+  mutate(hour_id = hour(pickup_date_hour), mode_id = 1, od_id = 1) %>% 
+  inner_join(select(provider_tb, provider_id, Base_License_Number), by = c("Dispatching_base_num" = "Base_License_Number")) %>%
   rename(location_id = locationID) %>%
-  select(hour_id, pickup_date_hour, mode_id, od_id, location_id, trips)
+  select(hour_id, pickup_date_hour, mode_id, od_id, location_id, provider_id, trips) %>%
+  # group by the 6 company categories to cut down on table size
+  group_by(hour_id, pickup_date_hour, mode_id, od_id, location_id, provider_id) %>%
+  summarise(trips = sum(trips))
 agg_tnc_table <- create_datekey(agg_tnc_table, "pickup_date_hour")
 # other modes
-agg_yellow_table <- od_collapse(agg_yellow_list, 2, "pickup_datetime", "dropoff_datetime")
-agg_green_table <- od_collapse(agg_green_list, 3, "pickup_datetime", "dropoff_datetime")
-agg_bike_table <- od_collapse(agg_bike_list, 5, "pickup_datetime", "dropoff_datetime")
+agg_yellow_table <- od_collapse(agg_yellow_list, 2, "pickup_datetime", "dropoff_datetime") %>%
+  mutate(provider_id = 7)
+agg_green_table <- od_collapse(agg_green_list, 2, "pickup_datetime", "dropoff_datetime")%>%
+  mutate(provider_id = 8)
+agg_bike_table <- od_collapse(agg_bike_list, 4, "pickup_datetime", "dropoff_datetime")%>%
+  mutate(provider_id = 9)
 
 # bind into one table and sort by date, hour, mode before creating pk
 fact_table <- bind_rows(agg_bike_table, agg_green_table, agg_yellow_table, agg_tnc_table) %>%

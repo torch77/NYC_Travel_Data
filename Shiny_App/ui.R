@@ -10,7 +10,7 @@ shinyUI(fluidPage(
   titlePanel("Trip Statistics by Mode for New York City"),
 
   sidebarLayout(position = "left", 
-                sidebarPanel(helpText("Chose the Dates, Hours, and Modes You Would Like to View"), 
+                sidebarPanel(helpText("Choose the Dates, Modes, and Aggregations You Would Like to View"), 
                              # inputPanel(
                              #   uiOutput("taxi_zones")
                              # ),
@@ -18,12 +18,16 @@ shinyUI(fluidPage(
                              inputPanel(
                                uiOutput("date_range")
                              ), 
-                             inputPanel(
-                               uiOutput("hour_range")
-                             ),   
+                             #inputPanel(
+                            #   uiOutput("hour_range")
+                             #),   
                              inputPanel(
                                uiOutput("modes")
                              ), 
+                             radioButtons("time_agg", "Choose a Temporal Aggregation Level:", 
+                                          c("Daily", "Weekly", "Hourly"), selected = "Daily"),
+                             radioButtons("prov_agg", "Group By:", 
+                                          c("Origin-Dest", "Provider"), selected = "Provider"),
                              inputPanel(
                               actionButton("eval_req", "Click to Run Query")
                              )
@@ -34,9 +38,10 @@ shinyUI(fluidPage(
                 mainPanel(
                   h1("Trips by Mode"),
                   h3("Select Zone Using Map"),
-                  leafletOutput("map", width = 500, height = 250),
-                  plotOutput("plot1",  width = "100%", height = 700),
+                  leafletOutput("map", width = 700, height = 400),
+                  plotlyOutput("plot1",  width = "100%", height = 700),
                   #plotOutput("plot2",  width = "100%", height = 700),
+                  downloadButton('downloadData', 'Download'),
                   dataTableOutput("table1")
                 ))
   

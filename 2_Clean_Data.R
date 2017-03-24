@@ -21,7 +21,6 @@ save_dfs <- function(dfs, location){
   rm(list = dfs, pos = ".GlobalEnv")
   gc()
 }
-
 spatial_convert <- function(o_df, d_df, o_coords, d_coords){
   origins <- SpatialPointsDataFrame(o_coords, o_df, 
                                     proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
@@ -34,7 +33,6 @@ spatial_convert <- function(o_df, d_df, o_coords, d_coords){
   return(trip_list)
   
 }
-
 # function to handle data that is too much to process in one df
 list_clean_up <- function(list, zones){
   final_list <- list()
@@ -77,6 +75,31 @@ list_clean_up <- function(list, zones){
     final_list[[i]] <- temp
   }
   return(final_list)
+}
+# function to handle subway outliers
+tsoutliers <- function(x,plot=FALSE){
+  # cribbed from http://stats.stackexchange.com/questions/1142/simple-algorithm-for-online-outlier-detection-of-a-generic-time-series
+  x <- as.ts(x)
+  if(frequency(x)>1){
+    resid <- stl(x,s.window="periodic",robust=TRUE)$time.series[,3]
+  }else{
+    tt <- 1:length(x)
+    resid <- residuals(loess(x ~ tt))
+  }
+  resid.q <- quantile(resid,prob=c(0.25,0.75))
+  iqr <- diff(resid.q)
+  limits <- resid.q + 1.5*iqr*c(-1,1)
+  score <- abs(pmin((resid-limits[1])/iqr,0) + pmax((resid - limits[2])/iqr,0))
+  if(plot){
+    plot(x)
+    x2 <- ts(rep(NA,length(x)))
+    x2[score>0] <- x[score>0]
+    tsp(x2) <- tsp(x)
+    points(x2,pch=19,col="red")
+    return(invisible(score))
+  }else{
+    return(as.numeric(score))
+  }
 }
 
 ##### Load/Clean Data #####
@@ -209,6 +232,35 @@ save_dfs(c("green_list_2016"), "./Data/Clean_Green_data_frames_2016.rda")
 ### Turnstile ###
 # load data
 load("./Data/Turnstile_data_frames.rda")
+
+
+unique(paste(turnstile_agg$station, turnstile_agg$linename, sep = "-"))
+
+# correct misnames stations and lines and then group
+
+
+turnstile_agg <- mutate(turnstile_data, datetime = mdy_hms(paste(date, time), tz = "America/New_York"),
+                            entries = abs(entries), exits = abs(exits), linename = as.character(linename)) %>%
+  group_by(station, linename, division, datetime) %>%
+  # need to be numeric b/c integers are too large
+  summarise(entries = sum(as.numeric(entries)), exits = sum(as.numeric(exits))) %>%
+  # drop entries that seem to be in error
+  filter(minute(datetime) == 0)
+
+# Calculate Entries/Exits based on difference between cumulative values
+turnstile_agg <- group_by(turnstile_agg, station) %>%
+  arrange(datetime) %>%
+  mutate(entry_val = c(NA,diff(entries)), exit_val = c(NA,diff(exits))) %>%
+  filter(!is.na(entry_val)) 
+# check for outliers
+turnstile_agg <- arrange(turnstile_agg, datetime) %>%
+  group_by(station) %>%
+  mutate(weekday = wday(datetime, label = T, abbr = T), entry_score = tsoutliers(entry_val), exit_score = tsoutliers(exit_val),
+         entry_val2 = if_else((entry_score > 5 | entry_val < 0), as.numeric(NA), as.numeric(entry_val)),
+         entry_val2 = na.interp(entry_val2), 
+         exit_val2 = if_else((exit_score > 5 | exit_val < 0), as.numeric(NA), as.numeric(exit_val)),
+         exit_val2 = na.interp(exit_val2)) %>% 
+  filter(datetime > "2017-01-01")
 
 # create date time
 turnstile_data <- mutate(turnstile_data, date_time = mdy_h(paste(DATE, sub(":.*$", "", TIME))))
