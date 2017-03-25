@@ -19,7 +19,7 @@ shinyUI(fluidPage(
                                uiOutput("date_range")
                              ), 
                              #inputPanel(
-                            #   uiOutput("hour_range")
+                             #   uiOutput("hour_range")
                              #),   
                              inputPanel(
                                uiOutput("modes")
@@ -28,6 +28,19 @@ shinyUI(fluidPage(
                                           c("Daily", "Weekly", "Hourly"), selected = "Daily"),
                              radioButtons("prov_agg", "Group By:", 
                                           c("Origin-Dest", "Provider"), selected = "Provider"),
+                             radioButtons("smoothing", "Smoothing Method:", 
+                                          c("None (Raw Data)" = "None", "Moving Average (trailing)" = "MA"), selected = "None"),
+                             # allow user to adjust n for moving average
+                             conditionalPanel(
+                               condition = "input.smoothing == 'MA'",
+                               sliderInput("ma_n", "Choose N for the Moving Avg.:", min = 2, max = 100, 
+                                           value = 10, step = 1)
+                             ),
+                             radioButtons("trend", "Trend Line:", 
+                                          c("None", "LOESS"), selected = "None"),
+                             # radioButtons("forecast", "Forecast Method:", 
+                             #              c("None" = "None", "Exp. Smoothing (select best exp. smoothing model via AIC)" = "exp"),
+                             #              selected = "None"),
                              inputPanel(
                               actionButton("eval_req", "Click to Run Query")
                              )

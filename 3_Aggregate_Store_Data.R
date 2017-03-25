@@ -242,6 +242,7 @@ hour_tb <- tibble(hour_id = 0:23, hour = 0:23) %>%
                                            "Peak", "Off Peak")))
 date_tb <- import.csv("./Data/Date_Table.csv")
 colnames(date_tb) <- tolower(colnames(date_tb))
+date_tb <- select(date_tb, datekey, fulldate, holiday.indicator)
 mode_tb <- tibble(mode_id = 1:4, mode_text = c("TNC", "Taxi", "Subway", "Bike Share"))
 # tnc companies and service providers
 provider_tb <- import.csv("./Data/Aggregate_TLC_Data/FHV_Base_Aggregate_Report.csv")
