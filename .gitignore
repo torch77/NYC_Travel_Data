@@ -24,6 +24,10 @@ Notes_Scratch/**
 Documentation/**
 Data/**
 Data_Outputs/**
+Shiny_App/db/**
+Shiny_App/taxi_zones/**
+Shiny_App/subway/**
+Shiny_App/rsconnect/**
 .dropbox
 
 # produced vignettes

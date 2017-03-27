@@ -109,26 +109,50 @@ aggregate_yellow <- function(yellow_list_2016, split){
     for(i in 1:length(yellow_list_2016)){
       print(i)
       if(i==1){
-        agg_yellow_origins <- group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
-          summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                    person_miles_travelled = sum(trip_distance*passenger_count)) 
-        
-        agg_yellow_dests <- group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
-          summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
-                    person_miles_travelled = sum(trip_distance)/sum(passenger_count)) 
+        if(is.data.frame(yellow_list_2016[[i]]$origins)){
+          # handle no lat lon data in df
+          agg_yellow_origins <- group_by(yellow_list_2016[[i]]$origins, LocationID, tpep_pickup_datetime) %>%
+            summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                      person_miles_travelled = sum(trip_distance*passenger_count)) 
+          
+          agg_yellow_dests <- group_by(yellow_list_2016[[i]]$dests, LocationID, tpep_dropoff_datetime) %>%
+            summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                      person_miles_travelled = sum(trip_distance)/sum(passenger_count)) 
+        }else{
+          agg_yellow_origins <- group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
+            summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                      person_miles_travelled = sum(trip_distance*passenger_count)) 
+          
+          agg_yellow_dests <- group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
+            summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                      person_miles_travelled = sum(trip_distance)/sum(passenger_count)) 
+        }
       }else{
+        if(is.data.frame(yellow_list_2016[[i]]$origins)){
         agg_yellow_origins <- bind_rows(agg_yellow_origins, 
-                                        group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
+                                        group_by(yellow_list_2016[[i]]$origins, LocationID, tpep_pickup_datetime) %>%
                                           summarise(trips = n(),
                                                     passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
                                                     person_miles_travelled = sum(trip_distance*passenger_count)))
         
         agg_yellow_dests <- bind_rows(agg_yellow_dests, 
-                                     group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
+                                     group_by(yellow_list_2016[[i]]$dests, LocationID, tpep_dropoff_datetime) %>%
                                        summarise(trips = n(),
                                                  passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
                                                  person_miles_travelled = sum(trip_distance)/sum(passenger_count))) 
-        
+        }else{
+          agg_yellow_origins <- bind_rows(agg_yellow_origins, 
+                                          group_by(yellow_list_2016[[i]]$origins@data, LocationID, tpep_pickup_datetime) %>%
+                                            summarise(trips = n(),
+                                                      passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                                                      person_miles_travelled = sum(trip_distance*passenger_count)))
+          
+          agg_yellow_dests <- bind_rows(agg_yellow_dests, 
+                                        group_by(yellow_list_2016[[i]]$dests@data, LocationID, tpep_dropoff_datetime) %>%
+                                          summarise(trips = n(),
+                                                    passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
+                                                    person_miles_travelled = sum(trip_distance)/sum(passenger_count))) 
+        }
         
       }
       
@@ -137,15 +161,28 @@ aggregate_yellow <- function(yellow_list_2016, split){
     for(i in 1:length(yellow_list_2016)){
       print(i)
       if(i==1){
-        agg_yellow_origins <- yellow_list_2016[[i]]$origins@data 
-        
-        agg_yellow_dests <- yellow_list_2016[[i]]$dests@data
+        if(is.data.frame(yellow_list_2016[[i]]$origins)){
+          agg_yellow_origins <- yellow_list_2016[[i]]$origins
+          
+          agg_yellow_dests <- yellow_list_2016[[i]]$dests
+        }else{
+          agg_yellow_origins <- yellow_list_2016[[i]]$origins@data 
+          
+          agg_yellow_dests <- yellow_list_2016[[i]]$dests@data
+        }
       }else{
-        agg_yellow_origins <- bind_rows(agg_yellow_origins, yellow_list_2016[[i]]$origins@data)
-        
-        agg_yellow_dests<- bind_rows(agg_yellow_dests, yellow_list_2016[[i]]$dests@data) 
+        if(is.data.frame(yellow_list_2016[[i]]$origins)){
+          agg_yellow_origins <- bind_rows(agg_yellow_origins, yellow_list_2016[[i]]$origins)
+          
+          agg_yellow_dests<- bind_rows(agg_yellow_dests, yellow_list_2016[[i]]$dests) 
+        }else{
+          agg_yellow_origins <- bind_rows(agg_yellow_origins, yellow_list_2016[[i]]$origins@data)
+          
+          agg_yellow_dests<- bind_rows(agg_yellow_dests, yellow_list_2016[[i]]$dests@data) 
+        }
         
       }
+      yellow_list_2016[[i]] <- NA
       gc()
     }
     # aggregate data
@@ -202,15 +239,15 @@ rm("bike_list", "duplicated_station_names", "agg_bike_origins", "agg_bike_dests"
 save_dfs(c("agg_bike_list"), "./Data/Agg_Bike_data_frames.rda")
 
 ### Green ###
-load("./Data/Clean_Green_data_frames_2016.rda")
+load("./Data/Clean_Green_data_frames.rda")
 
 ### Aggregate by day hour and zone
-agg_green_origins <- group_by(green_list_2016$origins@data, LocationID, lpep_pickup_datetime) %>%
+agg_green_origins <- group_by(green_list$origins, LocationID, lpep_pickup_datetime) %>%
   summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
             person_miles_travelled = sum(trip_distance*passenger_count)) %>%
   rename(pickup_datetime = lpep_pickup_datetime)
 
-agg_green_dests <- group_by(green_list_2016$dests@data, LocationID, lpep_dropoff_datetime) %>%
+agg_green_dests <- group_by(green_list$dests, LocationID, lpep_dropoff_datetime) %>%
   summarise(trips = n(), passengers = sum(passenger_count), avg_trip_distance = mean(trip_distance), 
             person_miles_travelled = sum(trip_distance)/sum(passenger_count)) %>%
   rename(dropoff_datetime = lpep_dropoff_datetime)
@@ -218,7 +255,7 @@ agg_green_dests <- group_by(green_list_2016$dests@data, LocationID, lpep_dropoff
 agg_green_list <- list(agg_green_origins, agg_green_dests)
 names(agg_green_list) <- c("origins","dests")
 
-rm("green_list_2016", "agg_green_origins", "agg_green_dests")
+rm("green_list", "agg_green_origins", "agg_green_dests")
 save_dfs(c("agg_green_list"), "./Data/Agg_Green_data_frames.rda")
 
 ### Yellow ###
@@ -226,8 +263,10 @@ load("./Data/Clean_Yellow_data_frames_2016.rda")
 
 ### Aggregate by day hour and zone
 agg_yellow_list <- aggregate_yellow(yellow_list_2016, split = F)
-
+# throwing a warning re memory right now but not an error, assuming this is fine
+# should look into using swap file space
 rm("yellow_list_2016")
+gc()
 save_dfs(c("agg_yellow_list"), "./Data/Agg_yellow_data_frames.rda")
 
 
@@ -240,9 +279,9 @@ hour_tb <- tibble(hour_id = 0:23, hour = 0:23) %>%
          am_pm = as.factor(if_else(hour_id < 12, "AM", "PM")), 
          peak_off_peak = as.factor(if_else((hour_id >= 7 & hour_id < 10) | (hour_id >= 17 & hour_id < 20), 
                                            "Peak", "Off Peak")))
-date_tb <- import.csv("./Data/Date_Table.csv")
+date_tb <- import.csv("./Data/Date_Table_v2.csv")
 colnames(date_tb) <- tolower(colnames(date_tb))
-date_tb <- select(date_tb, datekey, fulldate, holiday.indicator)
+#date_tb <- select(date_tb, datekey, fulldate, holiday.indicator)
 mode_tb <- tibble(mode_id = 1:4, mode_text = c("TNC", "Taxi", "Subway", "Bike Share"))
 # tnc companies and service providers
 provider_tb <- import.csv("./Data/Aggregate_TLC_Data/FHV_Base_Aggregate_Report.csv")
@@ -272,12 +311,12 @@ od_tb <- tibble(od_id = 1:2, od_type = c("Origin", "Destination"))
 ##### Store Data #####
 ### Initial Set Up ###
 # create db
-if(!dir.exists("./Data/db")){
-  dir.create("./Data/db")
+if(!dir.exists("./Shiny_App/db")){
+  dir.create("./shiny_App/db")
 }
 
 # Connect or Create Database in db directory
-db <- dbConnect(SQLite(), "./Data/db/congestion.sqlite")
+db <- dbConnect(SQLite(), "./Shiny_App/db/congestion_large.sqlite")
 
 # load dimensions, no primary keys for now
 load_table(db, taxi_zone_lookup, "taxi_zones", "location_id")
@@ -305,9 +344,13 @@ agg_tnc_table <- ungroup(agg_tnc_data) %>%
 agg_tnc_table <- create_datekey(agg_tnc_table, "pickup_date_hour")
 # other modes
 agg_yellow_table <- od_collapse(agg_yellow_list, 2, "pickup_datetime", "dropoff_datetime") %>%
-  mutate(provider_id = 7)
+  mutate(provider_id = 7) %>%
+  # only doing trips for now to save space
+  select(-one_of(c("passengers", "person_miles_travelled", "avg_trip_distance")))
 agg_green_table <- od_collapse(agg_green_list, 2, "pickup_datetime", "dropoff_datetime")%>%
-  mutate(provider_id = 8)
+  mutate(provider_id = 8) %>%
+  # only doing trips for now to save space
+  select(-one_of(c("passengers", "person_miles_travelled", "avg_trip_distance")))
 agg_bike_table <- od_collapse(agg_bike_list, 4, "pickup_datetime", "dropoff_datetime")%>%
   mutate(provider_id = 9)
 

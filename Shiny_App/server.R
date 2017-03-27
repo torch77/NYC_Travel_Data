@@ -8,16 +8,20 @@ library(plotly)
 library(RcppRoll)
 library(forecast)
 library(broom)
+library(RSQLite)
+
+
+#### Function for Labelling TNC's in ggplot, update to new labeller API
+ggplot_labeller <- function(variable, value){
+  return(mode_labels[value])
+}
+# 
+mode_labels <- c("Taxi" = "Taxi", "Bike Share" = "Bike Share", "TNC" ="Transportation Network Companies")
 
 #### Connect to DB, add check to make sure it exists
-db <- src_sqlite("C:/Users/Jwhit/Dropbox/Datasets/NYC_Travel_Data/Data/db/congestion.sqlite", create = F)
+db <- src_sqlite("./db/congestion_large.sqlite", create = F)
 # get taxi zones for ui
 taxi_zones <- tbl(db, "taxi_zones") %>% collect()
-# get date range for ui
-#dates <- select(tbl(db, "fact_table"), datekey) %>% collect(n = Inf)
-# hard code for now
-min_date <- ymd("2016-01-01")
-max_date <- ymd("2016-08-04")
 # set columns to drop for different group by scenarios
 hourly_prov_drop <- c("trips", "od_id", "od_type", "fact_id", "person_miles_travelled", 
                       "avg_trip_distance", "passengers")
@@ -35,47 +39,22 @@ daily_od_drop <- c("trips", "provider_id", "provider_type", "fact_id", "hour_id"
 weekly_od_drop <- c("trips", "provider_id", "provider_type", "fact_id", "hour_id", "hour_am_pm",
                    "peak_off_peak", "person_miles_travelled", "hour", "am_pm",
                    "avg_trip_distance", "passengers", "fulldate", "datekey", "holiday.indicator")
-#rm(dates)
-# get modes in db
-modes <- tbl(db, "mode_dim") %>% collect()
+
 #tbls for queries
-# get shapefile for taxi zones, why aren't relative paths working right now
-zone_polys <- readOGR(dsn = "C:/Users/Jwhit/Dropbox/Datasets/NYC_Travel_Data/Data/taxi_zones", layer = "taxi_zones_wgs")
+# get shapefile for taxi zones and subways
+zone_polys <- readOGR(dsn = "./taxi_zones", layer = "taxi_zones_wgs")
+subway_routes <- readOGR(dsn = "./subway/routes_nyc_subway_jan2017",
+                         layer = "routes_nyc_subway_jan2017_wgs")
+subway_routes$color <- paste0("#", subway_routes$color)
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
-  
-  # create dynamic ui drop down selectors 
-  output$taxi_zones <- renderUI({
-    selectInput("taxi_zones", label = h3("TLC Zones"), 
-                choices = taxi_zones$Zone, selected = "Union Sq")
-  })
-  # dynamic date range slection, returns character vector of ymd strings 
-  output$date_range <- renderUI({
-    dateRangeInput("date_range", label = h3("Date Range"),
-                   start = min_date, end = max_date, 
-                   min = min_date, max = max_date)
-  })
-  # dynamic mode selection, returns character vector of ticked boxes
-  output$modes <- renderUI({
-    checkboxGroupInput("modes", label = h3("Mode Choice"),
-                       choices = c("All", modes$mode_text), 
-                       selected = "All")
-  })
-  # dynamic hour selection, returns character vector of ticked boxes
-  # output$hour_range <- renderUI({
-  #   sliderInput("hour_range", label = h3("Hour Range"),
-  #               value = c(0,23), step = 1,
-  #               min = 0, max = 23)
-  # })
-  
   #####variable and table creation#####
-  
-  # reactive fx for sql query, only evaluate inputs when action button is clicked
+    # reactive fx for sql query, only evaluate inputs when action button is clicked
   db_query <- eventReactive(input$eval_req, {
     # get inputs for db query
-    #zone_choice <- input$taxi_zones
-    zone_choice <- input$map_shape_click$id
+    # set a default zone if not clicked, union sq
+    zone_choice <- ifelse(is.null(input$map_shape_click$id), 234, input$map_shape_click$id)
     mode_choice <- input$modes
     min_date_choice <- format(input$date_range[1])
     max_date_choice <- format(input$date_range[2])
@@ -137,7 +116,7 @@ shinyServer(function(input, output) {
     # collect results, drop unnecessary date columns, calculate week
     results <- query %>% 
       collect(n = Inf) %>%
-      mutate(fulldate = ymd(fulldate), fulldate = force_tz(fulldate, tzone = "America/New_York"),
+      mutate(fulldate = lubridate::ymd(fulldate), fulldate = force_tz(fulldate, tzone = "America/New_York"),
              week_num = (interval(min(fulldate), fulldate) %/% weeks(1)) + 1)
     
     # summarize according to user selection
@@ -168,7 +147,6 @@ shinyServer(function(input, output) {
         results <- group_by(results, provider_type)
       }
       else if(input$prov_agg == "Origin-Dest"){
-        View(results)
         results <- group_by(results, mode_text, od_type)
       }
       # calculate mean
@@ -184,29 +162,33 @@ shinyServer(function(input, output) {
       p <- ggplot(data = results,
                   aes(x = ymd_h(paste(fulldate, hour_id)), y = trips)) +
         geom_line(aes_string(color = color_var),  size = .2) +
-        facet_wrap("mode_text", nrow = 2) + 
         labs(x = "Date and Hour", y = "Trips")
     }else if(input$time_agg == "Daily"){
       p <- ggplot(data = results,
                   aes(x = fulldate, y = trips)) +
         #geom_bar(stat = "identity", aes_string(fill = color_var), color = "gray") +
         geom_line(aes_string(color = color_var),  size = .2) +
-        facet_wrap("mode_text", nrow = 2) + 
         labs(x = "Date", y = "Trips")
     }else if(input$time_agg == "Weekly"){
       p <- ggplot(data = results,
                   aes(x = week_num, y = trips)) +
         #geom_bar(stat = "identity", aes_string(fill = color_var), color = "gray") +
         geom_line(aes_string(color = color_var),  size = .2) +
-        facet_wrap("mode_text", nrow = 2) + 
         labs(x = "Week", y = "Trips") + scale_x_continuous(breaks = unique(results$week_num))
     }
+    # facet charts if od gropuing selecting
+    if(input$prov_agg == "Origin-Dest"){
+      p <- p + facet_wrap("mode_text", nrow = 2, labeller = ggplot_labeller)
+    }
     
-    # pick correct category labels
+    # pick correct category labels and colors
+    od_cols <- c("Destination" = "Red", "Origin" = "Blue")
+    provider_cols <- c("Uber" = "#09091a", "Lyft" = "#E70B81", "Via" = "#B0E2FF", "Yellow Taxi" = "#f7b731",
+                       "Green Taxi" = "#93DB70", "Citi Bike" = "#2E4DA7", "Other TNC/Black Car" = "#778899")
     if(input$prov_agg == "Provider"){
-      p <- p + scale_color_discrete(name = "Service Provider")
+      p <- p + scale_color_manual(name = "Service Provider", values = provider_cols)
     } else if(input$prov_agg == "Origin-Dest"){
-      p <- p + scale_color_discrete(name = "Origin/Dest Trips")
+      p <- p + scale_color_manual(name = "Origin/Dest Trips", values = od_cols)
     }
     
     # apply trend line if selected
@@ -249,19 +231,24 @@ shinyServer(function(input, output) {
 
   })
   
-  # selection map
-  # render base map
+  # selection and base map
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
-      addPolygons(data = zone_polys, weight = 1, fillOpacity = 0.4, smoothFactor = 0.5, 
+      setView(lat = 40.730610, lng = -73.935242, zoom = 10) %>%
+      addPolylines(data = subway_routes, color = subway_routes$color, smoothFactor = 1, 
+                   opacity = 1, weight = 1) %>%
+      addPolygons(data = zone_polys, weight = 1, fillOpacity = 0, smoothFactor = 1, color = "grey", 
                   popup = ~zone, layerId = zone_polys@data$LocationID)
   })
   # change color of selected polygon
   observe({
+    # set a default zone if not clicked, union sq
+    zone_choice <- ifelse(is.null(input$map_shape_click$id), 234, input$map_shape_click$id)
+    
     proxy <- leafletProxy("map", data = zone_polys) %>%
       removeShape(layerId = "clicked_poly") %>%
-      addPolygons(data = subset(zone_polys, LocationID == input$map_shape_click$id), 
+      addPolygons(data = subset(zone_polys, LocationID == zone_choice), 
                   color = "red", weight = 1, fillOpacity = 0.4, smoothFactor = 0.5, layerId = "clicked_poly")
   })
 
@@ -269,7 +256,7 @@ shinyServer(function(input, output) {
   output$downloadData <- downloadHandler(
     filename = "Results.csv",
     content = function(file){
-      write.csv(db_query(), file)
+      write.csv(db_query()$results, file)
     }
   )
   

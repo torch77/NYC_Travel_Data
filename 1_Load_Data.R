@@ -44,6 +44,7 @@ load.dir <- function(dir_name, file_ext, excl_word = NA, sheet_name, list = F){
     }else{
       print("incorrect file ext")
     }
+    colnames(tmp_file) <- tolower(colnames(tmp_file))
     #add file to main
     file_list[[i]] <- tmp_file
     # if(i==1){
@@ -89,18 +90,32 @@ save_dfs(dfs,  "./Data/Bike_data_frames.rda")
 
 #### Yellow Cab ###
 # load data into two data frames, one for each year
-yellow_data_2016 <- load.dir("./Data/Yellow_Cab/", ".csv", list = T)
+yellow_data_2015 <- load.dir("./Data/Yellow_Cab/", ".csv", "2016", list = T)
+dfs <- c("yellow_data_2015")
+save_dfs(dfs,"./Data/Yellow_data_frames_2015.rda")
+
+yellow_data_2016 <- load.dir("./Data/Yellow_Cab/", ".csv", "2015", list = T)
+# starting Jul 2016, trips are recorded by zone
+yellow_data_2016_no_lat_lon <- load.dir("./Data/Yellow_Cab/no_lat_lon/", ".csv", "2015", list = F)
+# drop artifically added cols (see notes) 
 # save/clear data
 dfs <- c("yellow_data_2016")
 save_dfs(dfs,"./Data/Yellow_data_frames_2016.rda")
+dfs <- c("yellow_data_2016_no_lat_lon")
+save_dfs(dfs,"./Data/Yellow_data_frames_2016_no_lat_lon.rda")
 
 
 ### Green Cab ###
 # load data into two data frames, one for each year
-green_data_2016 <- load.dir("./Data/Green_Cab/", ".csv", "2015")
+green_data <- load.dir("./Data/Green_Cab/", ".csv", NA)
+# data after Jun-2016 is already aggregated to TLC zone
+green_data_no_lat_lon <- load.dir("./Data/Green_Cab/No_Lat_Lon/", ".csv", NA)
+# drop artifically added cols (see notes) 
+green_data <- select(green_data, -one_of(c("x", "x.1")))
+green_data_no_lat_lon <- select(green_data_no_lat_lon, -one_of(c("x", "x.1")))
 # save/clear data
-dfs <- c("green_data_2016")
-save_dfs(dfs, "./Data/Green_data_frames_2016.rda")
+dfs <- c("green_data", "green_data_no_lat_lon")
+save_dfs(dfs, "./Data/Green_data_frames.rda")
 
 
 ### Turnstile ###

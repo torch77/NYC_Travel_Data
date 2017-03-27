@@ -101,6 +101,35 @@ tsoutliers <- function(x,plot=FALSE){
     return(as.numeric(score))
   }
 }
+# function to segregate o/ds and add zone info for data that doesn't have lat/lons
+zonal_data_clean <- function(x, taxi_type, zones){
+  # origins
+  if(taxi_type == "green"){
+  origins <- select_(x, "lpep_pickup_datetime", "pulocationid", "passenger_count", "trip_distance", "p_id") %>%
+    rename_("LocationID" = "pulocationid") %>%
+    inner_join(zones@data)
+  
+  # dests
+  dests <- select_(x, "lpep_dropoff_datetime", "dolocationid", "passenger_count", "trip_distance", "p_id") %>%
+    rename_("LocationID" = "dolocationid") %>%
+    inner_join(zones@data)
+  }else if(taxi_type =="yellow"){
+    origins <- select_(x, "tpep_pickup_datetime", "pulocationid", "passenger_count", "trip_distance", "p_id") %>%
+      rename_("LocationID" = "pulocationid") %>%
+      inner_join(zones@data)
+    
+    # dests
+    dests <- select_(x, "tpep_dropoff_datetime", "dolocationid", "passenger_count", "trip_distance", "p_id") %>%
+      rename_("LocationID" = "dolocationid") %>%
+      inner_join(zones@data)
+  }
+  
+  trip_list <- list(origins, dests)
+  names(trip_list) <- c("origins", "dests")
+  
+  return(trip_list)
+  
+}
 
 ##### Load/Clean Data #####
 ### TLC zones ###
@@ -130,8 +159,12 @@ save_dfs(c("tnc_data", "taxi_zone_lookup"), "./Data/Clean_TNC_data_frames.rda")
 load("./Data/Bike_data_frames.rda")
 
 # drop birth.year column since it's the only one with NA's, drop other personal data since not used
+# need to handle change in date format starting oct-2016. format went from m/d/y to y-m-d, lets hope hold
+# throws error b/c if_else evalates both true/false functions and then assigns correct value based on 
+# result of condition so ok to ignore. doesn't seem the most efficient 
 bike_data <- select(bike_data, -one_of(c("birth.year", "gender", "usertype", "bikeid"))) %>%
-  mutate(starttime = mdy_h(sub(":.*$", "", starttime)), stoptime = mdy_h(sub(":.*$", "", stoptime)))
+  mutate(starttime = if_else(grepl("/", starttime), mdy_h(sub(":.*$", "", starttime)), ymd_h(sub(":.*$", "", starttime))),
+         stoptime = if_else(grepl("/", stoptime), mdy_h(sub(":.*$", "", stoptime)), ymd_h(sub(":.*$", "", stoptime))))
 
 # create unique ID to match origins and destinations
 bike_data$p_id <- seq(1, nrow(bike_data), by = 1)
@@ -159,75 +192,89 @@ duplicated_station_names <- arrange(filter(end_stations, end.station.id %in% dup
 # need to drop out stations with different longitudes and latitudes
 station_list <- inner_join(end_stations, distinct(bike_data, end.station.id, end.station.latitude, end.station.longitude))
 rm("end_stations", "duplicate_end_stations", "bike_data")
-
 save_dfs(c("bike_list", "duplicated_station_names", "station_list"), "./Data/Clean_Bike_data_frames.rda")
 
 #### Yellow Cab ###
-# load data
+### load and clean lat lon data ###
+load("./Data/Yellow_data_frames_2015.rda")
+# names for 2015
+names(yellow_data_2015) <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+gc()
+yellow_list_2015 <- list_clean_up(yellow_data_2015, zones)
+
+save_dfs(c("yellow_list_2015"), "./Data/Clean_Yellow_data_frames_2015.rda")
+
 load("./Data/Yellow_data_frames_2016.rda")
 # names for 2016
 names(yellow_data_2016) <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun")
-
-# drop unused columns
-# yellow_data_2016 <- select(yellow_data_2016, one_of("tpep_pickup_datetime", "tpep_dropoff_datetime", 
-#                                                   "pickup_longitude", "pickup_latitude", "dropoff_longitude",
-#                                                   "dropoff_latitude","passenger_count", "trip_distance")) %>%
-#   mutate(tpep_pickup_datetime = ymd_h(sub(":.*$", "", tpep_pickup_datetime)), tpep_dropoff_datetime = 
-#            ymd_h(sub(":.*$", "", tpep_dropoff_datetime)))
-# # lower case all columns
-# colnames(yellow_data_2016) <- tolower(colnames(yellow_data_2016))
-# 
-# # create unique ID to match origins and destinations
-# yellow_data_2016$p_id <- seq(1, nrow(yellow_data_2016), by = 1)
-# 
-# # convert to spatial points data frame for intersection with tlc zones
-# yellow_list_2016 <- spatial_convert(select(yellow_data_2016, -one_of(c("pickup_longitude", "pickup_latitude")), -contains("dropoff")),
-#                                    select(yellow_data_2016, -one_of(c("dropoff_longitude", "dropoff_latitude")), -contains("pickup")),
-#                                    select(yellow_data_2016, one_of(c("pickup_longitude", "pickup_latitude"))),
-#                                    select(yellow_data_2016, one_of(c("dropoff_longitude", "dropoff_latitude"))))
-# 
-# 
-# 
-# # match points to TLC Zones, this will drop out trip ends outside of TLC zones
-# rm("yellow_data_2016")
-# gc()
-# yellow_list_2016$origins <- point.in.poly(yellow_list_2016$origins, zones)
-# gc()
-# yellow_list_2016$dests <- point.in.poly(yellow_list_2016$dests, zones) 
-
+gc()
 yellow_list_2016 <- list_clean_up(yellow_data_2016, zones)
+save_dfs(c("yellow_list_2016"), "./Data/Clean_Yellow_data_frames_2016_lat_lon.rda")
 
+### load non-lat lon data and combine with new data ###
+load("./Data/Yellow_data_frames_2016_no_lat_lon.rda")
+load("./Data/Clean_Yellow_data_frames_2016_lat_lon.rda")
 
+# primary id for data with no lat lon
+yellow_data_2016_no_lat_lon$p_id <- seq((max(yellow_list_2016[[length(yellow_list_2016)]]$origins@data$p_id)+1),
+                                  (nrow(yellow_data_2016_no_lat_lon)+
+                                     max(yellow_list_2016[[length(yellow_list_2016)]]$origins@data$p_id)), by = 1) 
+yellow_data_2016_no_lat_lon <- mutate(yellow_data_2016_no_lat_lon, 
+                                      tpep_pickup_datetime = ymd_h(sub(":.*$", "", tpep_pickup_datetime)), 
+                                      tpep_dropoff_datetime = ymd_h(sub(":.*$", "", tpep_dropoff_datetime)))
+
+# get o/d's for new data w/o lats/lons
+temp_list <- zonal_data_clean(yellow_data_2016_no_lat_lon, "yellow", zones)
+
+# add to list 
+yellow_list_2016[[length(yellow_list_2016)+1]] <- temp_list
+rm("temp_list", "yellow_data_2016_no_lat_lon")
 save_dfs(c("yellow_list_2016"), "./Data/Clean_Yellow_data_frames_2016.rda")
 
 ### Green Cab ###
 # load data
-load("./Data/Green_data_frames_2016.rda")
+load("./Data/Green_data_frames.rda")
 
 # drop unused columns
-green_data_2016 <- select(green_data_2016, one_of("lpep_pickup_datetime", "Lpep_dropoff_datetime", 
-                                                  "Pickup_longitude", "Pickup_latitude", "Dropoff_longitude",
-                                                  "Dropoff_latitude","Passenger_count", "Trip_distance")) %>%
-  mutate(lpep_pickup_datetime = ymd_h(sub(":.*$", "", lpep_pickup_datetime)), Lpep_dropoff_datetime = 
-           ymd_h(sub(":.*$", "", Lpep_dropoff_datetime)))
+green_data <- select(green_data, one_of("lpep_pickup_datetime", "lpep_dropoff_datetime", 
+                                                  "pickup_longitude", "pickup_latitude", "dropoff_longitude",
+                                                  "dropoff_latitude","passenger_count", "trip_distance")) %>%
+  mutate(lpep_pickup_datetime = ymd_h(sub(":.*$", "", lpep_pickup_datetime)), lpep_dropoff_datetime = 
+           ymd_h(sub(":.*$", "", lpep_dropoff_datetime)))
+
+green_data_no_lat_lon <- select(green_data_no_lat_lon, one_of("lpep_pickup_datetime", "lpep_dropoff_datetime", 
+                                        "pulocationid", "dolocationid", "passenger_count", "trip_distance")) %>%
+  mutate(lpep_pickup_datetime = ymd_h(sub(":.*$", "", lpep_pickup_datetime)), lpep_dropoff_datetime = 
+           ymd_h(sub(":.*$", "", lpep_dropoff_datetime)))
 # lower case all columns
-colnames(green_data_2016) <- tolower(colnames(green_data_2016))
+colnames(green_data) <- tolower(colnames(green_data))
+colnames(green_data_no_lat_lon) <- tolower(colnames(green_data_no_lat_lon))
 
 # create unique ID to match origins and destinations
-green_data_2016$p_id <- seq(1, nrow(green_data_2016), by = 1)
+green_data$p_id <- seq(1, nrow(green_data), by = 1)
+green_data_no_lat_lon$p_id <- seq((max(green_data$p_id)+1),
+                                  (nrow(green_data_no_lat_lon)+
+                                     max(green_data$p_id)), by = 1)
 
 # convert to spatial points data frame for intersection with tlc zones
-green_list_2016 <- spatial_convert(select(green_data_2016, -one_of(c("pickup_longitude", "pickup_latitude")), -contains("dropoff")),
-                             select(green_data_2016, -one_of(c("dropoff_longitude", "dropoff_latitude")), -contains("pickup")),
-                             select(green_data_2016, one_of(c("pickup_longitude", "pickup_latitude"))),
-                             select(green_data_2016, one_of(c("dropoff_longitude", "dropoff_latitude"))))
+green_list <- spatial_convert(select(green_data, -one_of(c("pickup_longitude", "pickup_latitude")), -contains("dropoff")),
+                             select(green_data, -one_of(c("dropoff_longitude", "dropoff_latitude")), -contains("pickup")),
+                             select(green_data, one_of(c("pickup_longitude", "pickup_latitude"))),
+                             select(green_data, one_of(c("dropoff_longitude", "dropoff_latitude"))))
 
 # match points to TLC Zones, this will drop out trip ends outside of TLC zones
-green_list_2016$origins <- point.in.poly(green_list_2016$origins, zones)
-green_list_2016$dests <- point.in.poly(green_list_2016$dests, zones) 
+green_list$origins <- point.in.poly(green_list$origins, zones)
+green_list$dests <- point.in.poly(green_list$dests, zones) 
 
-rm("green_data_2016")
-save_dfs(c("green_list_2016"), "./Data/Clean_Green_data_frames_2016.rda")
+# get o/d's for new data w/o lats/lons
+temp_list <- zonal_data_clean(green_data_no_lat_lon, "green", zones)
+
+# bind data together
+green_list$origins <- bind_rows(green_list$origins@data, temp_list$origins)
+green_list$dests <- bind_rows(green_list$dests@data, temp_list$dests)
+
+rm("green_data", "temp_list", "green_data_no_lat_lon")
+save_dfs(c("green_list"), "./Data/Clean_Green_data_frames.rda")
 
 ### Turnstile ###
 # load data
